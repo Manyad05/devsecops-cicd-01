@@ -1,6 +1,7 @@
 FROM nginx:alpine
 
-COPY . /usr/share/nginx/html
+# Remove default nginx page
+RUN rm -rf /usr/share/nginx/html/*
 
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+# Copy your HTML file
+COPY manish-portfolio2.html /usr/share/nginx/html/index.html
