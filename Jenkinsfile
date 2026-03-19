@@ -3,7 +3,8 @@ pipeline {
 
     environment {
         AWS_REGION = "ap-south-1"
-        ECR_REPO = "280020694900.dkr.ecr.ap-south-1.amazonaws.com/my-app"
+        ECR_REGISTRY = "280020694900.dkr.ecr.ap-south-1.amazonaws.com"
+        ECR_REPO = "my-app"
         IMAGE_TAG = "latest"
 
         SONARQUBE = "sonarqube"
@@ -16,14 +17,14 @@ pipeline {
 
     stages {
 
-        // 🔽 AUTO TRIGGER VIA GITHUB WEBHOOK
+        // 🔽 CHECKOUT
         stage('Checkout Code') {
             steps {
                 git branch: 'main', url: 'https://github.com/Manyad05/devsecops-cicd-01.git'
             }
         }
 
-        // 🔍 SONARQUBE SCAN
+        // 🔍 SONARQUBE ANALYSIS
         stage('SonarQube Analysis') {
             steps {
                 script {
@@ -57,38 +58,34 @@ pipeline {
             }
         }
 
-        // 🔐 TRIVY SCAN
+        // 🔐 TRIVY SECURITY SCAN
         stage('Trivy Scan') {
             steps {
                 sh 'trivy image --exit-code 1 --severity HIGH,CRITICAL my-app || true'
             }
         }
 
-        // 🔑 LOGIN TO ECR
+        // 🔑 LOGIN TO AWS ECR (FIXED)
         stage('Login to AWS ECR') {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-creds']]) {
-
-                    sh '''
-                    aws ecr get-login-password --region $AWS_REGION | \
-                    docker login --username AWS --password-stdin $ECR_REPO
-                    '''
-                }
-            }
-        }
-
-        // 📦 PUSH IMAGE
-        stage('Push Image to ECR') {
-            steps {
                 sh '''
-                docker tag my-app:latest $ECR_REPO:$IMAGE_TAG
-                docker push $ECR_REPO:$IMAGE_TAG
+                aws ecr get-login-password --region $AWS_REGION | \
+                docker login --username AWS --password-stdin $ECR_REGISTRY
                 '''
             }
         }
 
-        // 🚀 DEPLOY ECS
+        // 📦 PUSH IMAGE TO ECR
+        stage('Push Image to ECR') {
+            steps {
+                sh '''
+                docker tag my-app:latest $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+                docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+                '''
+            }
+        }
+
+        // 🚀 DEPLOY TO ECS
         stage('Deploy to ECS') {
             steps {
                 sh '''
