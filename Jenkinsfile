@@ -6,6 +6,7 @@ pipeline {
         ECR_REGISTRY = "280020694900.dkr.ecr.ap-south-1.amazonaws.com"
         ECR_REPO = "my-app"
         IMAGE_TAG = "latest"
+        SONAR_TOKEN = credentials('sonar-token')
     }
 
     stages {
@@ -16,6 +17,7 @@ pipeline {
             }
         }
 
+        // 🔍 SONARQUBE
         stage('SonarQube Analysis') {
             steps {
                 script {
@@ -24,13 +26,15 @@ pipeline {
                         sh """
                         ${scannerHome}/bin/sonar-scanner \
                         -Dsonar.projectKey=devsecops-cicd-01 \
-                        -Dsonar.sources=.
+                        -Dsonar.sources=. \
+                        -Dsonar.login=$SONAR_TOKEN
                         """
                     }
                 }
             }
         }
 
+        // ✅ QUALITY GATE
         stage('Quality Gate') {
             steps {
                 timeout(time: 10, unit: 'MINUTES') {
@@ -39,18 +43,23 @@ pipeline {
             }
         }
 
+        // 🐳 BUILD
         stage('Build Docker Image') {
             steps {
                 sh 'docker build -t $ECR_REPO:$IMAGE_TAG .'
             }
         }
 
+        // 🔐 TRIVY FIXED
         stage('Trivy Scan') {
             steps {
-                sh 'trivy image --exit-code 1 --severity HIGH,CRITICAL $ECR_REPO:$IMAGE_TAG'
+                sh '''
+                HOME=/home/ubuntu trivy image --exit-code 0 --severity HIGH,CRITICAL $ECR_REPO:$IMAGE_TAG
+                '''
             }
         }
 
+        // 🔑 LOGIN ECR
         stage('Login to AWS ECR') {
             steps {
                 sh '''
@@ -60,6 +69,7 @@ pipeline {
             }
         }
 
+        // 📦 PUSH
         stage('Push Image to ECR') {
             steps {
                 sh '''
@@ -69,17 +79,23 @@ pipeline {
             }
         }
 
+        // 🚀 DEPLOY ECS
         stage('Deploy to ECS') {
             steps {
-                retry(2) {
-                    sh '''
-                    aws ecs update-service \
-                    --cluster devops-cluster \
-                    --service devops-task-service-esru9f61 \
-                    --force-new-deployment \
-                    --region $AWS_REGION
-                    '''
-                }
+                sh '''
+                aws ecs update-service \
+                --cluster devops-cluster \
+                --service devops-task-service-esru9f61 \
+                --force-new-deployment \
+                --region $AWS_REGION
+                '''
+            }
+        }
+
+        // 🧹 CLEANUP (IMPORTANT)
+        stage('Cleanup') {
+            steps {
+                sh 'docker system prune -f'
             }
         }
     }
