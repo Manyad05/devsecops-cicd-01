@@ -6,66 +6,51 @@ pipeline {
         ECR_REGISTRY = "280020694900.dkr.ecr.ap-south-1.amazonaws.com"
         ECR_REPO = "my-app"
         IMAGE_TAG = "latest"
-
-        SONARQUBE = "sonarqube"
-        SONAR_TOKEN = credentials('sonar-token')
-    }
-
-    tools {
-        git 'Default'
     }
 
     stages {
 
-        // 🔽 CHECKOUT
         stage('Checkout Code') {
             steps {
-                git branch: 'main', url: 'https://github.com/Manyad05/devsecops-cicd-01.git'
+                checkout scm
             }
         }
 
-        // 🔍 SONARQUBE ANALYSIS
         stage('SonarQube Analysis') {
             steps {
                 script {
                     def scannerHome = tool 'sonar-scanner'
-                    withSonarQubeEnv("${SONARQUBE}") {
+                    withSonarQubeEnv('sonarqube') {
                         sh """
                         ${scannerHome}/bin/sonar-scanner \
                         -Dsonar.projectKey=devsecops-cicd-01 \
-                        -Dsonar.sources=. \
-                        -Dsonar.host.url=$SONAR_HOST_URL \
-                        -Dsonar.login=$SONAR_TOKEN
+                        -Dsonar.sources=.
                         """
                     }
                 }
             }
         }
 
-        // ✅ QUALITY GATE
         stage('Quality Gate') {
             steps {
-                timeout(time: 5, unit: 'MINUTES') {
+                timeout(time: 10, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: true
                 }
             }
         }
 
-        // 🐳 BUILD DOCKER IMAGE
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t my-app .'
+                sh 'docker build -t $ECR_REPO:$IMAGE_TAG .'
             }
         }
 
-        // 🔐 TRIVY SECURITY SCAN
         stage('Trivy Scan') {
             steps {
-                sh 'trivy image --exit-code 1 --severity HIGH,CRITICAL my-app || true'
+                sh 'trivy image --exit-code 1 --severity HIGH,CRITICAL $ECR_REPO:$IMAGE_TAG'
             }
         }
 
-        // 🔑 LOGIN TO AWS ECR (FIXED)
         stage('Login to AWS ECR') {
             steps {
                 sh '''
@@ -75,33 +60,33 @@ pipeline {
             }
         }
 
-        // 📦 PUSH IMAGE TO ECR
         stage('Push Image to ECR') {
             steps {
                 sh '''
-                docker tag my-app:latest $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+                docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
                 docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
                 '''
             }
         }
 
-        // 🚀 DEPLOY TO ECS
         stage('Deploy to ECS') {
             steps {
-                sh '''
-                aws ecs update-service \
-                --cluster devops-cluster \
-                --service devops-task-service-esru9f61 \
-                --force-new-deployment \
-                --region $AWS_REGION
-                '''
+                retry(2) {
+                    sh '''
+                    aws ecs update-service \
+                    --cluster devops-cluster \
+                    --service devops-task-service-esru9f61 \
+                    --force-new-deployment \
+                    --region $AWS_REGION
+                    '''
+                }
             }
         }
     }
 
     post {
         success {
-            echo "✅ Pipeline Success - Deployment Completed 🚀"
+            echo "✅ Deployment Successful 🚀"
         }
         failure {
             echo "❌ Pipeline Failed"
